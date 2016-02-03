@@ -102,8 +102,60 @@ export var DynamicMapLayer = RasterLayer.extend({
   },
 
   _buildExportParams: function () {
+
+    var paramsArray = [];
+
     var bounds = this._map.getBounds();
     var size = this._map.getSize();
+
+    var min = bounds.getSouthWest();
+    var max = bounds.getNorthEast();
+
+    var newXmax = min.lng;
+    var newXmin = min.lng;
+    var i = 0;
+
+    var d = (newXmin + 180) / 360;
+    var sign = Math.sign(d);
+    sign = (sign === 0) ? 1 : sign;
+    var coef = sign * Math.floor(Math.abs(d));
+    
+    
+
+    while (newXmax < max.lng)
+    {
+      newXmax =  360 * (coef + i) + sign*180;
+      
+      if (newXmax > max.lng)
+      {
+          newXmax = max.lng;
+      }
+
+      var normXMin = newXmin;
+      var normXMax = newXmax;
+
+      if ((newXmin<-180) | (newXmax>180))
+      {
+          var d2 = Math.floor((newXmin + 180) / 360);
+          normXMin -= d2 * 360;
+          normXMax -= d2 * 360;
+      }
+
+      var newBounds =  L.latLngBounds(L.latLng(min.lat, normXMin), L.latLng(max.lat, normXMax));
+
+      var width = (size.x* ( (newXmax- newXmin)/(max.lng - min.lng) ));
+      var newSize = { x: width, y:size.y };
+      var exportParams = this._buildOneWorldExportParams( newBounds,newSize );
+      
+      paramsArray.push({ bounds: newBounds, size: newSize, params: exportParams });
+      newXmin = newXmax;
+      i++;
+    }
+
+    return paramsArray;
+  },
+
+  _buildOneWorldExportParams: function(bounds, size){
     var ne = this._map.options.crs.project(bounds.getNorthEast());
     var sw = this._map.options.crs.project(bounds.getSouthWest());
     var sr = parseInt(this._map.options.crs.code.split(':')[1], 10);
@@ -153,16 +205,20 @@ export var DynamicMapLayer = RasterLayer.extend({
     return params;
   },
 
-  _requestExport: function (params, bounds) {
-    if (this.options.f === 'json') {
-      this.service.request('export', params, function (error, response) {
-        if (error) { return; } // we really can't do anything here but authenticate or requesterror will fire
-        this._renderImage(response.href, bounds);
-      }, this);
-    } else {
-      params.f = 'image';
-      this._renderImage(this.options.url + 'export' + L.Util.getParamString(params), bounds);
+  _requestExport: function (params) {
+    for(var i=0; i< params.length;i++){
+      var currentParam = params[i];
+      if (this.options.f === 'json') {
+        this.service.request('export', currentParam.params, function (error, response) {
+          if (error) { return; } // we really can't do anything here but authenticate or requesterror will fire
+          currentParam.href = response.href;
+        }, this);
+      } else {
+        currentParam.params.f = 'image';
+        currentParam.href = this.options.url + 'export' + L.Util.getParamString(currentParam.params);
+      }
     }
+    this._renderImages(params);
   }
 });
 

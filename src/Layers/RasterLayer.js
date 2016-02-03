@@ -1,19 +1,6 @@
 import L from 'leaflet';
 import {cors} from '../Support';
 
-var Overlay = L.ImageOverlay.extend({
-  onAdd: function (map) {
-    this._topLeft = map.getPixelBounds().min;
-    L.ImageOverlay.prototype.onAdd.call(this, map);
-  },
-  _reset: function () {
-    if (this._map.options.crs === L.CRS.EPSG3857) {
-      L.ImageOverlay.prototype._reset.call(this);
-    } else {
-      L.DomUtil.setPosition(this._image, this._topLeft.subtract(this._map.getPixelOrigin()));
-    }
-  }
-});
 
 export var RasterLayer = L.Layer.extend({
 
@@ -141,66 +128,67 @@ export var RasterLayer = L.Layer.extend({
     return this;
   },
 
-  _renderImage: function (url, bounds) {
+  _initImage: function () {
+      var img = L.DomUtil.create('img','leaflet-image-layer ' + (this._zoomAnimated ? 'leaflet-zoom-animated' : ''));
+      img.onselectstart = L.Util.falseFn;
+      img.onmousemove = L.Util.falseFn;
+      img.style.zIndex = this.options.zIndex;
+      img.alt = this.options.alt;
+      
+      if (this.options.opacity < 1) {
+          L.DomUtil.setOpacity(img, this.options.opacity);
+      }
+      
+      return img;
+  },
+
+  _renderImages: function (params) {
+         if (this._images){
+      for(var i=0;i<this._images.length;i++){
+        //var img  =this._images[i];
+        this.getPane(this.options.pane).removeChild(this._images[i]);
+        //L.DomEvent.off(this._images[i], 'click dblclick mousedown mouseup mouseover mousemove mouseout contextmenu',this._fireMouseEvent, this);
+      } 
+    }
+
+    this._images=[];
+
+
     if (this._map) {
-      // create a new image overlay and add it to the map
-      // to start loading the image
-      // opacity is 0 while the image is loading
-      var image = new Overlay(url, bounds, {
-        opacity: 0,
-        crossOrigin: this.options.useCors,
-        alt: this.options.alt,
-        pane: this.options.pane || this.getPane(),
-        interactive: this.options.interactive
-      }).addTo(this._map);
+      console.log('start');
+      for (var i=0;i<params.length;i++){
+        var p = params[i];
 
-      // once the image loads
-      image.once('load', function (e) {
-        if (this._map) {
-          var newImage = e.target;
-          var oldImage = this._currentImage;
+        var img = this._initImage();
+        img.onload = L.bind(this._imageLoaded, this, { image: img, mapParams: p });
+        img.src = p.href;
+      }
 
-          // if the bounds of this image matches the bounds that
-          // _renderImage was called with and we have a map with the same bounds
-          // hide the old image if there is one and set the opacity
-          // of the new image otherwise remove the new image
-          if (newImage._bounds.equals(bounds) && newImage._bounds.equals(this._map.getBounds())) {
-            this._currentImage = newImage;
-
-            if (this.options.position === 'front') {
-              this.bringToFront();
-            } else {
-              this.bringToBack();
-            }
-
-            if (this._map && this._currentImage._map) {
-              this._currentImage.setOpacity(this.options.opacity);
-            } else {
-              this._currentImage._map.removeLayer(this._currentImage);
-            }
-
-            if (oldImage && this._map) {
-              this._map.removeLayer(oldImage);
-            }
-
-            if (oldImage && oldImage._map) {
-              oldImage._map.removeLayer(oldImage);
-            }
-          } else {
-            this._map.removeLayer(newImage);
-          }
-        }
-
-        this.fire('load', {
-          bounds: bounds
-        });
-      }, this);
-
-      this.fire('loading', {
-        bounds: bounds
-      });
     }
   },
+
+  _imageLoaded:function(params){
+
+     var image = params.image,
+        bounds = new L.Bounds(
+            this._map.latLngToLayerPoint(params.mapParams.bounds.getNorthWest()),
+            this._map.latLngToLayerPoint(params.mapParams.bounds.getSouthEast())),
+        size = bounds.getSize();
+    
+    console.log(params.mapParams.bounds);
+    console.log(bounds.min);
+    
+    L.DomUtil.setPosition(image, bounds.min);
+
+    image.style.width  = size.x + 'px';
+    image.style.height = size.y + 'px';
+                
+    this.getPane(this.options.pane).appendChild(image);
+
+    this._images.push(image);
+  },
+
+  
 
   _update: function () {
     if (!this._map) {
@@ -222,9 +210,11 @@ export var RasterLayer = L.Layer.extend({
       return;
     }
 
-    var params = this._buildExportParams();
 
-    this._requestExport(params, bounds);
+
+    var params = this._buildExportParams();
+    
+    this._requestExport(params);
   },
 
   _renderPopup: function (latlng, error, results, response) {
